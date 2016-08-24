@@ -73,12 +73,34 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
   }
 
   func configureStorage() {
+    storageRef = FIRStorage.storage().referenceForURL("gs://friendlychat-820ac.appspot.com")
   }
 
   func configureRemoteConfig() {
+    remoteConfig = FIRRemoteConfig.remoteConfig()
+    let remoteConfigSettings = FIRRemoteConfigSettings(developerModeEnabled: true)
+    remoteConfig.configSettings = remoteConfigSettings!
   }
 
   func fetchConfig() {
+    var expirationDuration: Double = 3600
+    if (self.remoteConfig.configSettings.isDeveloperModeEnabled) {
+        expirationDuration = 0
+    }
+    remoteConfig.fetchWithExpirationDuration(expirationDuration) { (status, error) in
+        if (status == .Success) {
+            print("Config fetched!")
+            self.remoteConfig.activateFetched()
+            let friendlyMsgLength = self.remoteConfig["friendly_msg_length"]
+            if (friendlyMsgLength.source != .Static) {
+                self.msglength = friendlyMsgLength.numberValue!
+                print("Friendly msg length config: \(self.msglength)")
+            }
+        } else {
+            print("Config not fetched")
+            print("Error \(error)")
+        }
+    }
   }
 
   @IBAction func didPressFreshConfig(sender: AnyObject) {
@@ -118,11 +140,26 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
     let messageSnapshot: FIRDataSnapshot! = self.messages[indexPath.row]
     let message = messageSnapshot.value as! Dictionary<String, String>
     let name = message[Constants.MessageFields.name] as String!
-    let text = message[Constants.MessageFields.text] as String!
-    cell!.textLabel?.text = name + ": " + text
-    cell!.imageView?.image = UIImage(named: "ic_account_circle")
-    if let photoUrl = message[Constants.MessageFields.photoUrl], url = NSURL(string:photoUrl), data = NSData(contentsOfURL: url) {
-        cell!.imageView?.image = UIImage(data: data)
+    if let imageUrl = message[Constants.MessageFields.imageUrl] {
+        if imageUrl.hasPrefix("gs://") {
+            FIRStorage.storage().referenceForURL(imageUrl).dataWithMaxSize(INT64_MAX) { (data, error) in
+                if let error = error {
+                    print("Error downloading: \(error)")
+                    return
+                }
+                cell.imageView?.image = UIImage.init(data: data!)
+            }
+        } else if let url = NSURL(string:imageUrl), data = NSData(contentsOfURL: url) {
+            cell.imageView?.image = UIImage.init(data: data)
+        }
+        cell!.textLabel?.text = "sent by: \(name)"
+    } else {
+        let text = message[Constants.MessageFields.text] as String!
+        cell!.textLabel?.text = name + ": " + text
+        cell!.imageView?.image = UIImage(named: "ic_account_circle")
+        if let photoUrl = message[Constants.MessageFields.photoUrl], url = NSURL(string:photoUrl), data = NSData(contentsOfURL: url) {
+            cell!.imageView?.image = UIImage(data: data)
+        }
     }
     return cell!
   }
@@ -140,6 +177,8 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
     if let photoUrl = AppState.sharedInstance.photoUrl {
       mdata[Constants.MessageFields.photoUrl] = photoUrl.absoluteString
     }
+    // Push data to Firebase
+    self.ref.child("messages").childByAutoId().setValue(mdata)
   }
 
   // MARK: - Image Picker
@@ -156,6 +195,7 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
     presentViewController(picker, animated: true, completion:nil)
   }
 
+    // Upload the image user picked, then sync this image's storage URL to database so this image is sent inside the message.
   func imagePickerController(picker: UIImagePickerController,
     didFinishPickingMediaWithInfo info: [String : AnyObject]) {
       picker.dismissViewControllerAnimated(true, completion:nil)
@@ -167,14 +207,32 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
       asset?.requestContentEditingInputWithOptions(nil, completionHandler: { (contentEditingInput, info) in
         let imageFile = contentEditingInput?.fullSizeImageURL
         let filePath = "\(FIRAuth.auth()?.currentUser?.uid)/\(Int(NSDate.timeIntervalSinceReferenceDate() * 1000))/\(referenceUrl.lastPathComponent!)"
+        self.storageRef.child(filePath)
+            .putFile(imageFile!, metadata: nil) { (metadata, error) in
+                if let error = error {
+                    print("Error uploading: \(error.description)")
+                    return
+                }
+                self.sendMessage([Constants.MessageFields.imageUrl: self.storageRef.child((metadata?.path)!).description])
+        }
       })
     } else {
       let image = info[UIImagePickerControllerOriginalImage] as! UIImage
       let imageData = UIImageJPEGRepresentation(image, 0.8)
       let imagePath = FIRAuth.auth()!.currentUser!.uid +
         "/\(Int(NSDate.timeIntervalSinceReferenceDate() * 1000)).jpg"
+        let metadata = FIRStorageMetadata()
+        metadata.contentType = "image/jpeg"
+        self.storageRef.child(imagePath).putData(imageData!, metadata: metadata) { (metadata, error) in
+            if let error = error {
+                print("Error uploading: \(error)")
+                return
+            }
+            self.sendMessage([Constants.MessageFields.imageUrl: self.storageRef.child((metadata?.path)!).description])
+        }
     }
   }
+
 
   func imagePickerControllerDidCancel(picker: UIImagePickerController) {
     picker.dismissViewControllerAnimated(true, completion:nil)
