@@ -174,6 +174,7 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
     presentViewController(picker, animated: true, completion:nil)
   }
 
+    // Upload the image user picked, then sync this image's storage URL to database so this image is sent inside the message.
   func imagePickerController(picker: UIImagePickerController,
     didFinishPickingMediaWithInfo info: [String : AnyObject]) {
       picker.dismissViewControllerAnimated(true, completion:nil)
@@ -185,14 +186,32 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
       asset?.requestContentEditingInputWithOptions(nil, completionHandler: { (contentEditingInput, info) in
         let imageFile = contentEditingInput?.fullSizeImageURL
         let filePath = "\(FIRAuth.auth()?.currentUser?.uid)/\(Int(NSDate.timeIntervalSinceReferenceDate() * 1000))/\(referenceUrl.lastPathComponent!)"
+        self.storageRef.child(filePath)
+            .putFile(imageFile!, metadata: nil) { (metadata, error) in
+                if let error = error {
+                    print("Error uploading: \(error.description)")
+                    return
+                }
+                self.sendMessage([Constants.MessageFields.imageUrl: self.storageRef.child((metadata?.path)!).description])
+        }
       })
     } else {
       let image = info[UIImagePickerControllerOriginalImage] as! UIImage
       let imageData = UIImageJPEGRepresentation(image, 0.8)
       let imagePath = FIRAuth.auth()!.currentUser!.uid +
         "/\(Int(NSDate.timeIntervalSinceReferenceDate() * 1000)).jpg"
+        let metadata = FIRStorageMetadata()
+        metadata.contentType = "image/jpeg"
+        self.storageRef.child(imagePath).putData(imageData!, metadata: metadata) { (metadata, error) in
+            if let error = error {
+                print("Error uploading: \(error)")
+                return
+            }
+            self.sendMessage([Constants.MessageFields.imageUrl: self.storageRef.child((metadata?.path)!).description])
+        }
     }
   }
+
 
   func imagePickerControllerDidCancel(picker: UIImagePickerController) {
     picker.dismissViewControllerAnimated(true, completion:nil)
