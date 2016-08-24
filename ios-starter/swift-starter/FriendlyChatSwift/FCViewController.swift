@@ -77,9 +77,30 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
   }
 
   func configureRemoteConfig() {
+    remoteConfig = FIRRemoteConfig.remoteConfig()
+    let remoteConfigSettings = FIRRemoteConfigSettings(developerModeEnabled: true)
+    remoteConfig.configSettings = remoteConfigSettings!
   }
 
   func fetchConfig() {
+    var expirationDuration: Double = 3600
+    if (self.remoteConfig.configSettings.isDeveloperModeEnabled) {
+        expirationDuration = 0
+    }
+    remoteConfig.fetchWithExpirationDuration(expirationDuration) { (status, error) in
+        if (status == .Success) {
+            print("Config fetched!")
+            self.remoteConfig.activateFetched()
+            let friendlyMsgLength = self.remoteConfig["friendly_msg_length"]
+            if (friendlyMsgLength.source != .Static) {
+                self.msglength = friendlyMsgLength.numberValue!
+                print("Friendly msg length config: \(self.msglength)")
+            }
+        } else {
+            print("Config not fetched")
+            print("Error \(error)")
+        }
+    }
   }
 
   @IBAction func didPressFreshConfig(sender: AnyObject) {
