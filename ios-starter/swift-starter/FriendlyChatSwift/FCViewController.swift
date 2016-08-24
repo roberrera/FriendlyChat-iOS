@@ -165,8 +165,14 @@ class FCViewController: UIViewController, UITableViewDataSource, UITableViewDele
   }
 
   @IBAction func signOut(sender: UIButton) {
-    AppState.sharedInstance.signedIn = false
-    dismissViewControllerAnimated(true, completion: nil)
+    let firebaseAuth = FIRAuth.auth()
+    do {
+        try firebaseAuth?.signOut()
+        AppState.sharedInstance.signedIn = false
+        dismissViewControllerAnimated(true, completion: nil)
+    } catch let signOutError as NSError {
+        print ("Error signing out: \(signOutError)")
+    }
   }
 
   func showAlert(title:String, message:String) {
